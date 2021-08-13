@@ -29,6 +29,7 @@ public class ParamorphismDecrypt extends JFrame {
     private static Map<String, ClassNode> classes = new HashMap<>();
     private static Map<String, ClassNode> addedClasses = new HashMap<>();
     private static Map<String, byte[]> allThings = new HashMap<>();
+    private static Map<String, byte[]> otherThings = new HashMap<>();
 
     public static void main(String[] args) {
         new ParamorphismDecrypt().setVisible(true);
@@ -105,6 +106,7 @@ public class ParamorphismDecrypt extends JFrame {
                     } else if (jarEntry.getName().endsWith(".class/")) {
                         name = jarEntry.getName().substring(0, jarEntry.getName().length() - 1);
                     } else {
+                        otherThings.put(jarEntry.getName(), jarFile.getInputStream(jarEntry).readAllBytes());
                         continue;
                     }
 
@@ -126,6 +128,13 @@ public class ParamorphismDecrypt extends JFrame {
                     name = name + ".class";
                     jarOutStream.putNextEntry(new ZipEntry(name));
                     jarOutStream.write(b);
+                    jarOutStream.closeEntry();
+                }
+
+                // write resource or something
+                for (String other : otherThings.keySet()) {
+                    jarOutStream.putNextEntry(new ZipEntry(other));
+                    jarOutStream.write(otherThings.get(other));
                     jarOutStream.closeEntry();
                 }
 
