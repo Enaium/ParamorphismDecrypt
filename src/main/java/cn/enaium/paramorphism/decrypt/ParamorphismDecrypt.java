@@ -1,20 +1,35 @@
 package cn.enaium.paramorphism.decrypt;
 
 import cn.enaium.paramorphism.decrypt.util.JFileChooserUtil;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.*;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
 
 /**
  * @author Enaium
  */
 public class ParamorphismDecrypt extends JFrame {
+    private static Map<String, ClassNode> classes = new HashMap<>();
+    private static Map<String, ClassNode> addedClasses = new HashMap<>();
+    private static Map<String, byte[]> allThings = new HashMap<>();
+
     public static void main(String[] args) {
         new ParamorphismDecrypt().setVisible(true);
     }
@@ -92,18 +107,161 @@ public class ParamorphismDecrypt extends JFrame {
                     } else {
                         continue;
                     }
+
+                    readClass(name, jarFile.getInputStream(jarEntry).readAllBytes());
+                }
+
+                // 解密紫水晶生成的被加密的类
+                int decrypted = findAndDecrypt();
+                for (String name : classes.keySet()) {
+                    byte[] b = allThings.get(name + ".class");
+
+                    if (b == null) {
+                        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+                        ClassNode node = classes.get(name);
+                        node.accept(writer);
+                        b = writer.toByteArray();
+                    }
+
+                    name = name + ".class";
                     jarOutStream.putNextEntry(new ZipEntry(name));
-                    jarOutStream.write(jarFile.getInputStream(jarEntry).readAllBytes());
+                    jarOutStream.write(b);
                     jarOutStream.closeEntry();
                 }
+
                 jarFile.close();
                 jarOutStream.setComment("Decrypt By Enaium");
                 jarOutStream.close();
-                JOptionPane.showMessageDialog(ParamorphismDecrypt.this, "Decrypt Success!", "Success", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(ParamorphismDecrypt.this, "Decrypt Success!\nDecrypted " + decrypted + " classes!", "Success", JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException exception) {
                 exception.printStackTrace();
                 JOptionPane.showMessageDialog(ParamorphismDecrypt.this, exception.getMessage(), "ERROR", JOptionPane.ERROR_MESSAGE);
             }
         });
+    }
+
+    /**
+     * Decrypt the class file that encrypted by the obfuscator（紫水晶名字又臭又长打不出来）
+     */
+    private int findAndDecrypt() {
+        AtomicInteger number = new AtomicInteger();
+
+        classes.forEach((name, classNode) -> {
+            classNode.methods.forEach(methodNode -> {
+                if (!"<clinit>".equals(methodNode.name)) {
+                    return;
+                }
+
+                java.util.List<AbstractInsnNode> list = new ArrayList<>();
+                java.util.List<AbstractInsnNode> toRemove = new ArrayList<>();
+                AbstractInsnNode fieldInsnNode = null;
+                for (AbstractInsnNode insn : methodNode.instructions) {
+                    if (insn instanceof MethodInsnNode &&
+                            "()Ljava/lang/ClassLoader;".equals(((MethodInsnNode) insn).desc) &&
+                            "getClassLoader".equals(((MethodInsnNode) insn).name) &&
+                            insn.getNext() instanceof LdcInsnNode &&
+                            insn.getNext().getNext() instanceof LdcInsnNode &&
+                            insn.getNext().getNext().getNext().getOpcode() == Opcodes.INVOKESPECIAL &&
+                            insn.getNext().getNext().getNext().getNext() instanceof LdcInsnNode &&
+                            insn.getNext().getNext().getNext().getNext().getNext().getOpcode() == Opcodes.INVOKEVIRTUAL &&
+                            insn.getNext().getNext().getNext().getNext().getNext().getNext().getOpcode() == Opcodes.INVOKEVIRTUAL) {
+
+                        String encryptedClassName = (String) ((LdcInsnNode) insn.getNext()).cst;
+                        int length = (int) ((LdcInsnNode) insn.getNext().getNext()).cst;
+
+                        tryDecrypt(encryptedClassName, length);
+                        // remove all useless code
+                        fieldInsnNode = (insn.getNext().getNext().getNext().getNext().getNext().getNext().getNext());
+                        toRemove.addAll(removeBefore(fieldInsnNode));
+
+                        // 生成新的得到紫水晶生成的类的对象的指令
+                        String simpleName = encryptedClassName.replace(".class", "");
+                        list.add(new TypeInsnNode(Opcodes.NEW, simpleName));
+                        list.add(new InsnNode(Opcodes.DUP));
+                        list.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, simpleName, "<init>", "()V"));
+
+                        // 更改过的类需要移除，否则默认从allThings中取得byte不会应用更改
+                        allThings.remove(classNode.name + ".class");
+
+                        number.getAndIncrement();
+                    }
+                }
+                for (AbstractInsnNode node : toRemove) {
+                    methodNode.instructions.remove(node);
+                }
+                for (AbstractInsnNode node : list) {
+                    methodNode.instructions.insertBefore(fieldInsnNode, node);
+                }
+            });
+        });
+
+        classes.putAll(addedClasses);
+        return number.get();
+    }
+
+    private java.util.List<AbstractInsnNode> removeBefore(AbstractInsnNode insn) {
+        java.util.List<AbstractInsnNode> removeList = new ArrayList<>();
+        AbstractInsnNode now = insn.getPrevious();
+        while (now != null) {
+            removeList.add(now);
+            now = now.getPrevious();
+        }
+
+        return removeList;
+    }
+
+    private void tryDecrypt(String name, int length) {
+        // cool Paramorphism
+        byte[] encrypted = allThings.get(name);
+        byte[] decrypted = null;
+        try {
+            InputStream var4 = new ByteArrayInputStream(encrypted);
+            DataInputStream var5 = new DataInputStream(var4);
+            decrypted = new byte[length];
+            var5.readFully(decrypted, 0, var4.available());
+
+            for(int var6 = 7; var6 >= 0; --var6) {
+                decrypted[7 - var6] = (byte)((int)(2272919233031569408L >> 8 * var6 & 255L));
+            }
+
+            var4.close();
+            GZIPInputStream var8 = new GZIPInputStream(new ByteArrayInputStream((byte[])decrypted.clone()));
+            var5 = new DataInputStream(var8);
+            var5.readFully(decrypted);
+            var8.close();
+        } catch (Exception ignored) {
+        }
+
+        // remove the encrypted class
+        allThings.remove(name);
+        readClass(name, decrypted, true);
+        allThings.remove(name);        // (流汗黄豆)
+    }
+
+    private void readClass(String name, byte[] bytes) {
+        readClass(name, bytes, false);
+    }
+
+    /**
+     * avoid throwing the ConcurrentModificationException
+     * @param name
+     * @param bytes
+     * @param newMap
+     */
+    private void readClass(String name, byte[] bytes, boolean newMap){
+        try {
+            ClassReader reader = new ClassReader(bytes);
+            ClassNode node = new ClassNode();
+            reader.accept(node, ClassReader.SKIP_FRAMES);
+            if(newMap){
+                node.name = name.replace(".class", "");
+                addedClasses.put(node.name, node);
+            } else {
+                classes.put(node.name, node);
+            }
+        } catch (Exception ignored) {
+        }
+        // put all things to this map to get the bytes easily
+        allThings.put(name, bytes);
     }
 }
