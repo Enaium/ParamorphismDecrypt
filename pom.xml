@@ -6,7 +6,7 @@
 
     <groupId>cn.enaium.paramorphism.decrypt</groupId>
     <artifactId>ParamorphismDecrypt</artifactId>
-    <version>1.2</version>
+    <version>1.3</version>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
@@ -17,27 +17,27 @@
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm</artifactId>
-            <version>8.0.1</version>
+            <version>9.2</version>
         </dependency>
         <dependency>
         <groupId>org.ow2.asm</groupId>
         <artifactId>asm-util</artifactId>
-        <version>8.0.1</version>
+        <version>9.2</version>
        </dependency>
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm-commons</artifactId>
-            <version>8.0.1</version>
+            <version>9.2</version>
         </dependency>
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm-tree</artifactId>
-            <version>8.0.1</version>
+            <version>9.2</version>
         </dependency>
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm-analysis</artifactId>
-            <version>8.0.1</version>
+            <version>9.2</version>
         </dependency>
     </dependencies>
     <build>
