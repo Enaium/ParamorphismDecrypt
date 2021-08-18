@@ -13,10 +13,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
 import java.util.zip.GZIPInputStream;
@@ -26,10 +24,10 @@ import java.util.zip.ZipEntry;
  * @author Enaium
  */
 public class ParamorphismDecrypt extends JFrame {
-    private static Map<String, ClassNode> classes = new HashMap<>();
-    private static Map<String, ClassNode> addedClasses = new HashMap<>();
-    private static Map<String, byte[]> allThings = new HashMap<>();
-    private static Map<String, byte[]> otherThings = new HashMap<>();
+    private static final Map<String, ClassNode> classes = new HashMap<>();
+    private static final Map<String, ClassNode> addedClasses = new HashMap<>();
+    private static final Map<String, byte[]> allThings = new HashMap<>();
+    private static final Map<String, byte[]> otherThings = new HashMap<>();
 
     public static void main(String[] args) {
         new ParamorphismDecrypt().setVisible(true);
@@ -109,11 +107,9 @@ public class ParamorphismDecrypt extends JFrame {
                         otherThings.put(jarEntry.getName(), jarFile.getInputStream(jarEntry).readAllBytes());
                         continue;
                     }
-
                     readClass(name, jarFile.getInputStream(jarEntry).readAllBytes());
                 }
 
-                // 解密紫水晶生成的被加密的类
                 int decrypted = findAndDecrypt();
                 for (String name : classes.keySet()) {
                     byte[] b = allThings.get(name + ".class");
@@ -150,7 +146,7 @@ public class ParamorphismDecrypt extends JFrame {
     }
 
     /**
-     * Decrypt the class file that encrypted by the obfuscator（紫水晶名字又臭又长打不出来）
+     * Decrypt the class file that encrypted by the obfuscator
      */
     private int findAndDecrypt() {
         AtomicInteger number = new AtomicInteger();
