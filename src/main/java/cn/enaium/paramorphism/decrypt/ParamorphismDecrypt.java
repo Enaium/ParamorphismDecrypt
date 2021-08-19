@@ -1,5 +1,6 @@
 package cn.enaium.paramorphism.decrypt;
 
+import cn.enaium.paramorphism.decrypt.util.ByteUtil;
 import cn.enaium.paramorphism.decrypt.util.JFileChooserUtil;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
@@ -125,7 +126,18 @@ public class ParamorphismDecrypt extends JFrame {
                         b = writer.toByteArray();
                     }
 
-                    name = name + ".class";
+                    /*
+                        一些JAR文件被混淆后，紫水晶会将类名或包名重命名为带有 字节：0x00 的名字的类（例如紫水晶本体）
+                        这样在压缩软件中是无法正常显示类名的
+                        将会显示为空名字的文件
+                        移除掉所有 0x00 之后才可以正常显示
+                        After the JAR file is obfuscated,
+                        Paramorphism will rename the class name or package name to random Java keyword with byte:0x00
+                        (for example, Paramorphism-1.3-Hotfix.jar)
+                        In this way, the class will be displayed as a file with an empty name in the decompression software
+                        It can be displayed normally after removing all 0x00
+                     */
+                    name = ByteUtil.removeJunkByte(name + ".class");
                     jarOutStream.putNextEntry(new ZipEntry(name));
                     jarOutStream.write(b);
                     jarOutStream.closeEntry();
