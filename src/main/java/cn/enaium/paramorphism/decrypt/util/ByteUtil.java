@@ -12,7 +12,7 @@ public class ByteUtil {
     /**
      * Remove 0x00 in the string
      * [0, 1, 2, 3] -> [1, 2, 3]
-     *
+     * https://blog.csdn.net/zhou452840622/article/details/104797262
      * @param str in
      * @return cleaned string
      */
@@ -24,6 +24,9 @@ public class ByteUtil {
                 buffer.put(b);
             }
         }
-        return new String(buffer.array());
+        buffer.flip();
+        byte[] validByte = new byte[buffer.limit()];
+        buffer.get(validByte, 0, buffer.limit());
+        return new String(validByte);
     }
 }
