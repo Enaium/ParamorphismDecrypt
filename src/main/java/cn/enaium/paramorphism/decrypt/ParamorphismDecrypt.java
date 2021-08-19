@@ -103,6 +103,10 @@ public class ParamorphismDecrypt extends JFrame {
                         name = jarEntry.getName();
                     } else if (jarEntry.getName().endsWith(".class/")) {
                         name = jarEntry.getName().substring(0, jarEntry.getName().length() - 1);
+                    } else if(jarEntry.isDirectory()
+                            || jarEntry.getName().endsWith(".class/encrypted_data")
+                            || jarEntry.getName().endsWith(".class/name")){
+                        continue;
                     } else {
                         otherThings.put(jarEntry.getName(), jarFile.getInputStream(jarEntry).readAllBytes());
                         continue;
