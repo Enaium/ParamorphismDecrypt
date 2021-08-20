@@ -1,10 +1,8 @@
 package cn.enaium.paramorphism.decrypt;
 
-import cn.enaium.paramorphism.decrypt.util.ByteUtil;
+import cn.enaium.paramorphism.decrypt.util.Utils;
 import cn.enaium.paramorphism.decrypt.util.JFileChooserUtil;
-import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
 
 import javax.swing.*;
@@ -12,23 +10,15 @@ import java.awt.*;
 import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.*;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
-import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
 
 /**
  * @author Enaium
  */
 public class ParamorphismDecrypt extends JFrame {
-    private static final Map<String, ClassNode> classes = new HashMap<>();
-    private static final Map<String, ClassNode> addedClasses = new HashMap<>();
-    private static final Map<String, byte[]> allThings = new HashMap<>();
-    private static final Map<String, byte[]> otherThings = new HashMap<>();
 
     public static void main(String[] args) {
         new ParamorphismDecrypt().setVisible(true);
@@ -104,55 +94,24 @@ public class ParamorphismDecrypt extends JFrame {
                         name = jarEntry.getName();
                     } else if (jarEntry.getName().endsWith(".class/")) {
                         name = jarEntry.getName().substring(0, jarEntry.getName().length() - 1);
-                    } else if(jarEntry.isDirectory()
+                    } else if (jarEntry.isDirectory()
                             || jarEntry.getName().endsWith(".class/encrypted_data")
-                            || jarEntry.getName().endsWith(".class/name")){
+                            || jarEntry.getName().endsWith(".class/name")) {
                         continue;
                     } else {
-                        otherThings.put(jarEntry.getName(), jarFile.getInputStream(jarEntry).readAllBytes());
+                        Utils.otherThings.put(jarEntry.getName(), jarFile.getInputStream(jarEntry).readAllBytes());
                         continue;
                     }
-                    readClass(name, jarFile.getInputStream(jarEntry).readAllBytes());
+                    Utils.readClass(name, jarFile.getInputStream(jarEntry).readAllBytes());
                 }
 
-                int decrypted = findAndDecrypt();
-                for (String name : classes.keySet()) {
-                    byte[] b = allThings.get(name + ".class");
+                // Decrypt the encrypted class created by Paramorphism.
+                int decrypted = Utils.findAndDecrypt();
+                Utils.remap();
 
-                    if (b == null) {
-                        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-                        ClassNode node = classes.get(name);
-                        node.accept(writer);
-                        b = writer.toByteArray();
-                    }
-
-                    /*
-                        一些JAR文件被混淆后，紫水晶会将类名或包名重命名为带有 字节：0x00 的名字的类（例如紫水晶本体）
-                        这样在压缩软件中是无法正常显示类名的
-                        将会显示为空名字的文件
-                        移除掉所有 0x00 之后才可以正常显示
-                        After the JAR file is obfuscated,
-                        Paramorphism will rename the class name or package name to random Java keyword with byte:0x00
-                        (for example, Paramorphism-1.3-Hotfix.jar)
-                        In this way, the class will be displayed as a file with an empty name in the decompression software
-                        It can be displayed normally after removing all 0x00
-                     */
-                    name = ByteUtil.removeJunkByte(name + ".class");
-                    jarOutStream.putNextEntry(new ZipEntry(name));
-                    jarOutStream.write(b);
-                    jarOutStream.closeEntry();
-                }
-
-                // write resource or something
-                for (String other : otherThings.keySet()) {
-                    jarOutStream.putNextEntry(new ZipEntry(other));
-                    jarOutStream.write(otherThings.get(other));
-                    jarOutStream.closeEntry();
-                }
-
+                Utils.writeFile(jarOutStream);
                 jarFile.close();
-                jarOutStream.setComment("Decrypt By Enaium");
-                jarOutStream.close();
+
                 JOptionPane.showMessageDialog(ParamorphismDecrypt.this, "Decrypt Success!\nDecrypted " + decrypted + " classes!", "Success", JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException exception) {
                 exception.printStackTrace();
@@ -161,128 +120,4 @@ public class ParamorphismDecrypt extends JFrame {
         });
     }
 
-    /**
-     * Decrypt the class file that encrypted by the obfuscator
-     */
-    private int findAndDecrypt() {
-        AtomicInteger number = new AtomicInteger();
-
-        classes.forEach((name, classNode) -> {
-            classNode.methods.forEach(methodNode -> {
-                if (!"<clinit>".equals(methodNode.name)) {
-                    return;
-                }
-
-                java.util.List<AbstractInsnNode> list = new ArrayList<>();
-                java.util.List<AbstractInsnNode> toRemove = new ArrayList<>();
-                AbstractInsnNode fieldInsnNode = null;
-                for (AbstractInsnNode insn : methodNode.instructions) {
-                    if (insn instanceof MethodInsnNode &&
-                            "()Ljava/lang/ClassLoader;".equals(((MethodInsnNode) insn).desc) &&
-                            "getClassLoader".equals(((MethodInsnNode) insn).name) &&
-                            insn.getNext() instanceof LdcInsnNode &&
-                            insn.getNext().getNext() instanceof LdcInsnNode &&
-                            insn.getNext().getNext().getNext().getOpcode() == Opcodes.INVOKESPECIAL &&
-                            insn.getNext().getNext().getNext().getNext() instanceof LdcInsnNode &&
-                            insn.getNext().getNext().getNext().getNext().getNext().getOpcode() == Opcodes.INVOKEVIRTUAL &&
-                            insn.getNext().getNext().getNext().getNext().getNext().getNext().getOpcode() == Opcodes.INVOKEVIRTUAL) {
-
-                        String encryptedClassName = (String) ((LdcInsnNode) insn.getNext()).cst;
-                        int length = (int) ((LdcInsnNode) insn.getNext().getNext()).cst;
-
-                        tryDecrypt(encryptedClassName, length);
-                        // remove all useless code
-                        fieldInsnNode = (insn.getNext().getNext().getNext().getNext().getNext().getNext().getNext());
-                        toRemove.addAll(removeBefore(fieldInsnNode));
-
-                        // 生成新的得到紫水晶生成的类的对象的指令
-                        String simpleName = encryptedClassName.replace(".class", "");
-                        list.add(new TypeInsnNode(Opcodes.NEW, simpleName));
-                        list.add(new InsnNode(Opcodes.DUP));
-                        list.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, simpleName, "<init>", "()V"));
-
-                        // 更改过的类需要移除，否则默认从allThings中取得byte不会应用更改
-                        allThings.remove(classNode.name + ".class");
-
-                        number.getAndIncrement();
-                    }
-                }
-                for (AbstractInsnNode node : toRemove) {
-                    methodNode.instructions.remove(node);
-                }
-                for (AbstractInsnNode node : list) {
-                    methodNode.instructions.insertBefore(fieldInsnNode, node);
-                }
-            });
-        });
-
-        classes.putAll(addedClasses);
-        return number.get();
-    }
-
-    private java.util.List<AbstractInsnNode> removeBefore(AbstractInsnNode insn) {
-        java.util.List<AbstractInsnNode> removeList = new ArrayList<>();
-        AbstractInsnNode now = insn.getPrevious();
-        while (now != null) {
-            removeList.add(now);
-            now = now.getPrevious();
-        }
-
-        return removeList;
-    }
-
-    private void tryDecrypt(String name, int length) {
-        // cool Paramorphism
-        byte[] encrypted = allThings.get(name);
-        byte[] decrypted = null;
-        try {
-            InputStream var4 = new ByteArrayInputStream(encrypted);
-            DataInputStream var5 = new DataInputStream(var4);
-            decrypted = new byte[length];
-            var5.readFully(decrypted, 0, var4.available());
-
-            for(int var6 = 7; var6 >= 0; --var6) {
-                decrypted[7 - var6] = (byte)((int)(2272919233031569408L >> 8 * var6 & 255L));
-            }
-
-            var4.close();
-            GZIPInputStream var8 = new GZIPInputStream(new ByteArrayInputStream((byte[])decrypted.clone()));
-            var5 = new DataInputStream(var8);
-            var5.readFully(decrypted);
-            var8.close();
-        } catch (Exception ignored) {
-        }
-
-        // remove the encrypted class
-        allThings.remove(name);
-        readClass(name, decrypted, true);
-        allThings.remove(name);        // (流汗黄豆)
-    }
-
-    private void readClass(String name, byte[] bytes) {
-        readClass(name, bytes, false);
-    }
-
-    /**
-     * avoid throwing the ConcurrentModificationException
-     * @param name
-     * @param bytes
-     * @param newMap
-     */
-    private void readClass(String name, byte[] bytes, boolean newMap){
-        try {
-            ClassReader reader = new ClassReader(bytes);
-            ClassNode node = new ClassNode();
-            reader.accept(node, ClassReader.SKIP_FRAMES);
-            if(newMap){
-                node.name = name.replace(".class", "");
-                addedClasses.put(node.name, node);
-            } else {
-                classes.put(node.name, node);
-            }
-        } catch (Exception ignored) {
-        }
-        // put all things to this map to get the bytes easily
-        allThings.put(name, bytes);
-    }
 }
