@@ -1,6 +1,5 @@
 package cn.enaium.paramorphism.decrypt.util;
 
-import cn.enaium.paramorphism.decrypt.ParamorphismDecrypt;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -12,14 +11,11 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
-import java.util.jar.Manifest;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
 
@@ -63,59 +59,57 @@ public class Utils {
     public static int findAndDecrypt() {
         AtomicInteger number = new AtomicInteger();
 
-        classes.forEach((name, classNode) -> {
-            classNode.methods.forEach(methodNode -> {
-                if (!"<clinit>".equals(methodNode.name)) {
-                    return;
+        classes.forEach((name, classNode) -> classNode.methods.forEach(methodNode -> {
+            if (!"<clinit>".equals(methodNode.name)) {
+                return;
+            }
+
+            List<AbstractInsnNode> list = new ArrayList<>();
+            List<AbstractInsnNode> toRemove = new ArrayList<>();
+            AbstractInsnNode fieldInsnNode = null;
+            for (AbstractInsnNode insn : methodNode.instructions) {
+                // find Paramorphism decryption node
+                if (insn instanceof MethodInsnNode &&
+                        "()Ljava/lang/ClassLoader;".equals(((MethodInsnNode) insn).desc) &&
+                        "getClassLoader".equals(((MethodInsnNode) insn).name) &&
+                        insn.getNext() instanceof LdcInsnNode &&
+                        insn.getNext().getNext() instanceof LdcInsnNode &&
+                        insn.getNext().getNext().getNext().getOpcode() == Opcodes.INVOKESPECIAL &&
+                        insn.getNext().getNext().getNext().getNext() instanceof LdcInsnNode &&
+                        insn.getNext().getNext().getNext().getNext().getNext().getOpcode() == Opcodes.INVOKEVIRTUAL &&
+                        insn.getNext().getNext().getNext().getNext().getNext().getNext().getOpcode() == Opcodes.INVOKEVIRTUAL) {
+
+                    String encryptedClassName = (String) ((LdcInsnNode) insn.getNext()).cst;
+                    int length = (int) ((LdcInsnNode) insn.getNext().getNext()).cst;
+
+                    // decrypt the encrypted class
+                    tryDecrypt(encryptedClassName, length);
+
+                    // remove all useless code
+                    fieldInsnNode = insn.getNext().getNext().getNext().getNext().getNext().getNext().getNext();
+                    toRemove.addAll(removeBefore(fieldInsnNode));
+
+                    // fix node
+                    // 生成新的得到紫水晶生成的类的对象的指令
+                    String simpleName = encryptedClassName.replace(".class", "");
+                    list.add(new TypeInsnNode(Opcodes.NEW, simpleName));
+                    list.add(new InsnNode(Opcodes.DUP));
+                    list.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, simpleName, "<init>", "()V"));
+
+                    // remove the modified class from allThings to apply the changes
+                    // 更改过的类需要移除，否则默认从allThings中取得byte不会应用更改
+                    allThings.remove(classNode.name + ".class");
+
+                    number.getAndIncrement();
                 }
-
-                java.util.List<AbstractInsnNode> list = new ArrayList<>();
-                java.util.List<AbstractInsnNode> toRemove = new ArrayList<>();
-                AbstractInsnNode fieldInsnNode = null;
-                for (AbstractInsnNode insn : methodNode.instructions) {
-                    // find Paramorphism decryption node
-                    if (insn instanceof MethodInsnNode &&
-                            "()Ljava/lang/ClassLoader;".equals(((MethodInsnNode) insn).desc) &&
-                            "getClassLoader".equals(((MethodInsnNode) insn).name) &&
-                            insn.getNext() instanceof LdcInsnNode &&
-                            insn.getNext().getNext() instanceof LdcInsnNode &&
-                            insn.getNext().getNext().getNext().getOpcode() == Opcodes.INVOKESPECIAL &&
-                            insn.getNext().getNext().getNext().getNext() instanceof LdcInsnNode &&
-                            insn.getNext().getNext().getNext().getNext().getNext().getOpcode() == Opcodes.INVOKEVIRTUAL &&
-                            insn.getNext().getNext().getNext().getNext().getNext().getNext().getOpcode() == Opcodes.INVOKEVIRTUAL) {
-
-                        String encryptedClassName = (String) ((LdcInsnNode) insn.getNext()).cst;
-                        int length = (int) ((LdcInsnNode) insn.getNext().getNext()).cst;
-
-                        // decrypt the encrypted class
-                        tryDecrypt(encryptedClassName, length);
-
-                        // remove all useless code
-                        fieldInsnNode = insn.getNext().getNext().getNext().getNext().getNext().getNext().getNext();
-                        toRemove.addAll(removeBefore(fieldInsnNode));
-
-                        // fix node
-                        // 生成新的得到紫水晶生成的类的对象的指令
-                        String simpleName = encryptedClassName.replace(".class", "");
-                        list.add(new TypeInsnNode(Opcodes.NEW, simpleName));
-                        list.add(new InsnNode(Opcodes.DUP));
-                        list.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, simpleName, "<init>", "()V"));
-
-                        // remove the modified class from allThings to apply the changes
-                        // 更改过的类需要移除，否则默认从allThings中取得byte不会应用更改
-                        allThings.remove(classNode.name + ".class");
-
-                        number.getAndIncrement();
-                    }
-                }
-                for (AbstractInsnNode node : toRemove) {
-                    methodNode.instructions.remove(node);
-                }
-                for (AbstractInsnNode node : list) {
-                    methodNode.instructions.insertBefore(fieldInsnNode, node);
-                }
-            });
-        });
+            }
+            for (AbstractInsnNode node : toRemove) {
+                methodNode.instructions.remove(node);
+            }
+            for (AbstractInsnNode node : list) {
+                methodNode.instructions.insertBefore(fieldInsnNode, node);
+            }
+        }));
 
         classes.putAll(addedClasses);
         return number.get();
@@ -157,7 +151,7 @@ public class Utils {
             }
 
             var4.close();
-            GZIPInputStream var8 = new GZIPInputStream(new ByteArrayInputStream((byte[])decrypted.clone()));
+            GZIPInputStream var8 = new GZIPInputStream(new ByteArrayInputStream(decrypted.clone()));
             var5 = new DataInputStream(var8);
             var5.readFully(decrypted);
             var8.close();
@@ -175,10 +169,10 @@ public class Utils {
     }
 
     /**
-     * avoid throwing the ConcurrentModificationException
-     * @param name
-     * @param bytes
-     * @param newMap
+     * avoid throwing ConcurrentModificationException
+     * @param name class name
+     * @param bytes class bytes
+     * @param newMap avoid throwing ConcurrentModificationException
      */
     private static void readClass(String name, byte[] bytes, boolean newMap){
         try {
@@ -204,7 +198,7 @@ public class Utils {
         classes.forEach((name, classNode) -> {
             String packageName = name.lastIndexOf('/') == -1 ? "" : name.substring(0, name.lastIndexOf('/'));
             if (packageName.length() > 0) {
-                int lin = -1;
+                int lin;
                 while ((lin = packageName.lastIndexOf('/')) != -1) {
                     String parentPackage = packageName.substring(0, lin);
                     if (!remapper.mapPackage(packageName, removeJunkByte(packageName))) {
