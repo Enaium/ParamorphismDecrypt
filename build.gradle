@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'cn.enaium'
-version '1.3'
+version '1.4'
 
 sourceCompatibility = JavaVersion.VERSION_11
 targetCompatibility = JavaVersion.VERSION_11
@@ -17,6 +17,7 @@ repositories {
 
 dependencies {
     implementation 'org.ow2.asm:asm-tree:9.2'
+    implementation 'org.ow2.asm:asm-commons:9.2'
 }
 
 jar {
@@ -30,6 +31,7 @@ shadowJar {
     dependencies {
         include(dependency('org.ow2.asm:asm'))
         include(dependency('org.ow2.asm:asm-tree'))
+        include(dependency('org.ow2.asm:asm-commons'))
     }
 }
 
